@@ -177,25 +177,15 @@ def main():
         st.write(f"Тест Люнга-Бокса: p-value = {ri['lb_pvalue']:.6f} | "
                  f"Автокорреляция: {'да' if ri['has_autocorr'] else 'нет'}")
 
-    hr = result['hac_results']
-    st.write(f"**T-тест с HAC (Newey-West):** p-value = {hr['p_value_hac']:.6f} | "
-             f"Среднее остатков: {hr['mean_residuals']:.6f} | "
-             f"95% ДИ: [{hr['ci_mean_hac'][0]:.6f}, {hr['ci_mean_hac'][1]:.6f}]")
-
-    dm = result['dm_results']
-    st.write(f"**Тест Диболда-Мариано:** p-value = {dm['dm_pvalue']:.6f} | "
-             f"DM статистика: {dm['dm_stat']:.6f}")
-
-    # --- Диагностика отклонений прогноза (Forecast deviation diagnostics) ---
+    # --- Диагностика отклонений прогноза (PIT и CUSUMSQ) ---
     if result.get('diagnostics') is not None:
         st.markdown('---')
         st.subheader('Диагностика отклонений прогноза (Forecast deviation diagnostics)')
         for line in result['diagnostics']['summary_lines']:
             st.write(line)
         st.caption(
-            "Маленькие p (PIT/JB) → возможная некалибровка распределения прогноза; "
-            "маленький p (LB) → систематическая динамика в ошибках; "
-            "маленький CUSUMSQ p → нестабильность дисперсии/режима."
+            "PIT (KS): маленький p → возможная некалибровка распределения прогноза. "
+            "CUSUMSQ: маленький p → нестабильность дисперсии/режима."
         )
 
     st.markdown('---')

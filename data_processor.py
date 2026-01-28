@@ -19,46 +19,6 @@ from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.stattools import acf
 
 
-def newey_west_se(data, max_lags=None):
-    """Стандартная ошибка с Newey-West корректировкой."""
-    n = len(data)
-    mean_data = np.mean(data)
-    if max_lags is None:
-        max_lags = int(4 * (n / 100) ** (2/9))
-    max_lags = min(max_lags, n - 1)
-    gamma_0 = np.var(data, ddof=0)
-    hac_variance = gamma_0
-    for lag in range(1, max_lags + 1):
-        weight = 1 - lag / (max_lags + 1)
-        autocov = np.mean((data[lag:] - mean_data) * (data[:-lag] - mean_data))
-        hac_variance += 2 * weight * autocov
-    return np.sqrt(hac_variance / n), max_lags
-
-
-def diebold_mariano_test(forecast1, forecast2, actual, h=1, power=2):
-    """Тест Диболда-Мариано для сравнения точности двух прогнозов."""
-    forecast1 = np.array(forecast1)
-    forecast2 = np.array(forecast2)
-    actual = np.array(actual)
-    loss1 = np.abs(forecast1 - actual) ** power
-    loss2 = np.abs(forecast2 - actual) ** power
-    d = loss1 - loss2
-    d_mean = np.mean(d)
-    n = len(d)
-    gamma_0 = np.var(d, ddof=0)
-    max_lags = min(int(4 * (n / 100) ** (2/9)), n - 1, h - 1)
-    hac_variance = gamma_0
-    for lag in range(1, max_lags + 1):
-        weight = 1 - lag / (max_lags + 1)
-        if lag < n:
-            autocov = np.mean((d[lag:] - d_mean) * (d[:-lag] - d_mean))
-            hac_variance += 2 * weight * autocov
-    hac_se = np.sqrt(hac_variance / n)
-    dm_stat = d_mean / hac_se if hac_se > 0 else 0
-    p_value = 2 * (1 - stats.norm.cdf(abs(dm_stat))) if hac_se > 0 else 1.0
-    return dm_stat, p_value, d_mean, hac_se
-
-
 def cusumsq(resid):
     """CUSUM of squares path and statistic."""
     e2 = resid ** 2
@@ -119,10 +79,6 @@ class ForecastDeviationDiagnostics:
         results = {}
         ks_stat, ks_p = stats.kstest(self.pit, "uniform")
         results["PIT_KS"] = (ks_stat, ks_p)
-        jb_stat, jb_p = stats.jarque_bera(self.z)
-        results["JB_z"] = (jb_stat, jb_p)
-        lb = acorr_ljungbox(self.z, lags=[min(3, len(self.z) // 3)], return_df=True)
-        results["LB_z"] = (float(lb["lb_stat"].iloc[0]), float(lb["lb_pvalue"].iloc[0]))
         cusq = cusumsq_bootstrap(self.z)
         results["CUSUMSQ"] = cusq
         self.results = results
@@ -132,9 +88,7 @@ class ForecastDeviationDiagnostics:
         r = self.results
         return [
             f"Sample size: {len(self.z)}",
-            f"PIT / distributional: KS(stat)={r['PIT_KS'][0]:.3f}, p={r['PIT_KS'][1]:.3f}",
-            f"Jarque–Bera(z): stat={r['JB_z'][0]:.3f}, p={r['JB_z'][1]:.3f}",
-            f"Ljung–Box(z): stat={r['LB_z'][0]:.3f}, p={r['LB_z'][1]:.3f}",
+            f"PIT (KS): stat={r['PIT_KS'][0]:.3f}, p={r['PIT_KS'][1]:.3f}",
             f"CUSUMSQ p-value: {r['CUSUMSQ']['p_value']:.3f}",
         ]
 
@@ -208,8 +162,7 @@ def process(df, target_platform='tta_android', target_product='avia',
     - feature_importance: DataFrame важности признаков
     - time_series_df: DataFrame с датами, фактом и прогнозом
     - residuals_info: информация об остатках
-    - hac_results: результаты t-теста с HAC
-    - dm_results: результаты теста Диболда-Мариано
+    - diagnostics: PIT и CUSUMSQ (если n_test >= 15)
     - summary: итоговая сводка
     - figures: список matplotlib.Figure для отображения
     """
@@ -294,8 +247,9 @@ def process(df, target_platform='tta_android', target_product='avia',
     predicted_values = test_predictions_with_dates['predicted'].values
     residuals_test = actual_values - predicted_values
     n_test = len(residuals_test)
+    mean_residuals = float(np.mean(residuals_test))
 
-    # Тест Люнга-Бокса
+    # Тест Люнга-Бокса (для информации об остатках)
     max_lag = min(10, n_test // 4) if n_test // 4 > 0 else 0
     has_autocorr = False
     lb_stat, lb_pvalue = None, None
@@ -309,21 +263,6 @@ def process(df, target_platform='tta_android', target_product='avia',
             lb_stat = lb_stat_arr[-1] if hasattr(lb_stat_arr, '__getitem__') else lb_stat_arr
             lb_pvalue = lb_pvalue_arr[-1] if hasattr(lb_pvalue_arr, '__getitem__') else lb_pvalue_arr
         has_autocorr = lb_pvalue < 0.05
-
-    # HAC t-тест
-    hac_se, n_lags_used = newey_west_se(residuals_test)
-    mean_residuals = float(np.mean(residuals_test))
-    t_stat_hac = mean_residuals / hac_se
-    p_value_hac = float(2 * (1 - stats.t.cdf(abs(t_stat_hac), n_test - 1)))
-    t_critical = stats.t.ppf(0.975, n_test - 1)
-    ci_mean_hac = (mean_residuals - t_critical * hac_se, mean_residuals + t_critical * hac_se)
-    conclusion = "ЗНАЧИМОЕ" if p_value_hac < 0.05 else "НЕЗНАЧИМОЕ"
-
-    # Тест Диболда-Мариано
-    dm_stat, dm_pvalue, d_mean, dm_se = diebold_mariano_test(
-        predicted_values, actual_values, actual_values, h=1, power=2
-    )
-    dm_conclusion = "ЗНАЧИМОЕ" if dm_pvalue < 0.05 else "НЕЗНАЧИМОЕ"
 
     info_lines = [
         f"Целевая колонка: {target_column}",
@@ -343,18 +282,7 @@ def process(df, target_platform='tta_android', target_product='avia',
         'has_autocorr': has_autocorr, 'lb_stat': lb_stat, 'lb_pvalue': lb_pvalue, 'max_lag': max_lag,
     }
 
-    hac_results = {
-        'mean_residuals': mean_residuals, 'hac_se': hac_se, 'n_lags_used': n_lags_used,
-        't_stat_hac': t_stat_hac, 'p_value_hac': p_value_hac, 'ci_mean_hac': ci_mean_hac,
-        'conclusion': conclusion,
-    }
-
-    dm_results = {
-        'dm_stat': dm_stat, 'dm_pvalue': dm_pvalue, 'd_mean': d_mean, 'dm_se': dm_se,
-        'dm_conclusion': dm_conclusion,
-    }
-
-    # --- Диагностика отклонений прогноза (Forecast deviation diagnostics) ---
+    # --- Диагностика отклонений прогноза (PIT и CUSUMSQ) ---
     diagnostics_results = None
     diagnostics_figures = []
     if n_test >= 15:
@@ -363,8 +291,6 @@ def process(df, target_platform='tta_android', target_product='avia',
             diag.run_tests()
             diagnostics_results = {
                 'PIT_KS': diag.results['PIT_KS'],
-                'JB_z': diag.results['JB_z'],
-                'LB_z': diag.results['LB_z'],
                 'CUSUMSQ_pvalue': diag.results['CUSUMSQ']['p_value'],
                 'summary_lines': diag.summary_lines(),
             }
@@ -409,11 +335,6 @@ def process(df, target_platform='tta_android', target_product='avia',
              label='Фактические значения', color=line_actual)
     ax1.plot(dates, predicted_values, marker='s', linestyle='--', linewidth=2.5, markersize=6,
              label='Прогноз модели', color=line_pred)
-    ci_lower = predicted_values + ci_mean_hac[0]
-    ci_upper = predicted_values + ci_mean_hac[1]
-    x_vals = dates if has_order_date else range(len(dates))
-    ax1.fill_between(x_vals, ci_lower, ci_upper, alpha=0.35, color=line_ci,
-                     label='95% ДИ для среднего остатков (HAC)')
     ax1.set_xlabel('Дата')
     ax1.set_ylabel(f'Относительное изменение {target_column}')
     ax1.set_title(f'Временной ряд: факт vs прогноз — {target_platform} / {target_product}')
@@ -429,12 +350,10 @@ def process(df, target_platform='tta_android', target_product='avia',
     ax2.hist(residuals_test, bins=bins, alpha=0.85, color=line_actual, edgecolor=text_light, linewidth=0.8, label='Остатки')
     ax2.axvline(mean_residuals, color=line_mean, linestyle='--', linewidth=2.5,
                 label=f'Среднее: {mean_residuals:.6f}')
-    ax2.axvline(ci_mean_hac[0], color=line_ci, linestyle=':', linewidth=2, label='95% ДИ (HAC)')
-    ax2.axvline(ci_mean_hac[1], color=line_ci, linestyle=':', linewidth=2)
     ax2.axvline(0, color=text_light, linestyle='-', linewidth=1.2, alpha=0.8, label='Ноль (H₀)')
     ax2.set_xlabel('Остатки (факт - прогноз)')
     ax2.set_ylabel('Частота')
-    ax2.set_title(f'Распределение остатков • t-тест с HAC: p-value = {p_value_hac:.6f}')
+    ax2.set_title('Распределение остатков')
     ax2.legend(loc='best', fontsize=9, facecolor=bg_dark, edgecolor=grid_color, labelcolor=text_light)
     _dark_axes(ax2)
     plt.tight_layout()
@@ -474,12 +393,18 @@ def process(df, target_platform='tta_android', target_product='avia',
     figures.extend(diagnostics_figures)
 
     summary_lines = [
-        "ИТОГОВАЯ СВОДКА СТАТИСТИЧЕСКИХ ТЕСТОВ",
-        f"1. Автокорреляция: {'обнаружена' if has_autocorr else 'не обнаружена'}",
-        f"2. T-тест с HAC (Newey-West): p-value = {p_value_hac:.6f} — {'значимо' if p_value_hac < 0.05 else 'незначимо'}",
-        f"3. Тест Диболда-Мариано: p-value = {dm_pvalue:.6f} — {'значимо' if dm_pvalue < 0.05 else 'незначимо'}",
-        f"ОБЩИЙ ВЫВОД: Различие между прогнозом и фактом — {conclusion}",
+        "ИТОГОВАЯ СВОДКА",
+        f"1. Автокорреляция остатков (Ljung-Box): {'обнаружена' if has_autocorr else 'не обнаружена'}",
     ]
+    if diagnostics_results is not None:
+        summary_lines.append(
+            f"2. PIT (KS): stat={diagnostics_results['PIT_KS'][0]:.3f}, p={diagnostics_results['PIT_KS'][1]:.3f}"
+        )
+        summary_lines.append(
+            f"3. CUSUMSQ p-value: {diagnostics_results['CUSUMSQ_pvalue']:.3f}"
+        )
+    else:
+        summary_lines.append("2. Диагностика PIT/CUSUMSQ: недоступна (нужно n_test >= 15)")
 
     return {
         'info': info_lines,
@@ -491,8 +416,6 @@ def process(df, target_platform='tta_android', target_product='avia',
         'feature_importance': feature_importance,
         'time_series_df': test_predictions_with_dates,
         'residuals_info': residuals_info,
-        'hac_results': hac_results,
-        'dm_results': dm_results,
         'diagnostics': diagnostics_results,
         'summary': summary_lines,
         'figures': figures,
