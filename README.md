@@ -10,7 +10,7 @@ Streamlit-приложение для анализа данных временн
 ## Установка
 
 ```bash
-cd webapp
+cd HDDCI
 python -m venv venv
 venv\Scripts\activate   # Windows
 # или: source venv/bin/activate   # Linux/macOS
@@ -39,7 +39,7 @@ streamlit run app.py
 ## Структура репозитория
 
 ```
-webapp/
+HDDCI/
 ├── app.py              # Точка входа Streamlit
 ├── data_processor.py   # Логика анализа и построение графиков
 ├── requirements.txt

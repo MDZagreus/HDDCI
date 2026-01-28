@@ -59,6 +59,144 @@ def diebold_mariano_test(forecast1, forecast2, actual, h=1, power=2):
     return dm_stat, p_value, d_mean, hac_se
 
 
+def cusumsq(resid):
+    """CUSUM of squares path and statistic."""
+    e2 = resid ** 2
+    S = np.cumsum(e2) / np.sum(e2)
+    t = np.arange(1, len(resid) + 1) / len(resid)
+    stat = np.max(np.abs(S - t))
+    return S, stat
+
+
+def cusumsq_bootstrap(resid, n_boot=2000, seed=42):
+    """Bootstrap CUSUMSQ for small samples (T <= 45)."""
+    rng = np.random.default_rng(seed)
+    T = len(resid)
+    S_obs, stat_obs = cusumsq(resid - resid.mean())
+    stats_boot = []
+    S_boot = []
+    for _ in range(n_boot):
+        rb = rng.choice(resid, size=T, replace=True)
+        Sb, sb = cusumsq(rb - rb.mean())
+        stats_boot.append(sb)
+        S_boot.append(Sb)
+    stats_boot = np.array(stats_boot)
+    S_boot = np.array(S_boot)
+    p_value = np.mean(stats_boot >= stat_obs)
+    lo = np.quantile(S_boot, 0.025, axis=0)
+    hi = np.quantile(S_boot, 0.975, axis=0)
+    return {"S": S_obs, "stat": stat_obs, "p_value": p_value, "band_lo": lo, "band_hi": hi}
+
+
+class ForecastDeviationDiagnostics:
+    """
+    Диагностика отклонений прогноза (факт vs прогноз).
+    Вход: DataFrame с колонками date, actual, predicted.
+    """
+
+    def __init__(self, df: pd.DataFrame):
+        required = {"date", "actual", "predicted"}
+        if not required.issubset(df.columns):
+            raise ValueError(f"DataFrame must contain columns {required}")
+        self.df = (
+            df[["date", "actual", "predicted"]]
+            .dropna()
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
+        if len(self.df) < 15:
+            raise ValueError("Too few observations (need at least ~15)")
+        self.y = self.df["actual"].values
+        self.mu = self.df["predicted"].values
+        self.t = self.df["date"].values
+        self.resid = self.y - self.mu
+        self.sigma = np.std(self.resid, ddof=1)
+        self.z = self.resid / self.sigma
+        self.pit = stats.norm.cdf(self.z)
+        self.results = None
+
+    def run_tests(self):
+        results = {}
+        ks_stat, ks_p = stats.kstest(self.pit, "uniform")
+        results["PIT_KS"] = (ks_stat, ks_p)
+        jb_stat, jb_p = stats.jarque_bera(self.z)
+        results["JB_z"] = (jb_stat, jb_p)
+        lb = acorr_ljungbox(self.z, lags=[min(3, len(self.z) // 3)], return_df=True)
+        results["LB_z"] = (float(lb["lb_stat"].iloc[0]), float(lb["lb_pvalue"].iloc[0]))
+        cusq = cusumsq_bootstrap(self.z)
+        results["CUSUMSQ"] = cusq
+        self.results = results
+        return results
+
+    def summary_lines(self):
+        r = self.results
+        return [
+            f"Sample size: {len(self.z)}",
+            f"PIT / distributional: KS(stat)={r['PIT_KS'][0]:.3f}, p={r['PIT_KS'][1]:.3f}",
+            f"Jarque–Bera(z): stat={r['JB_z'][0]:.3f}, p={r['JB_z'][1]:.3f}",
+            f"Ljung–Box(z): stat={r['LB_z'][0]:.3f}, p={r['LB_z'][1]:.3f}",
+            f"CUSUMSQ p-value: {r['CUSUMSQ']['p_value']:.3f}",
+        ]
+
+    def build_figures(self, bg_dark, text_light, line_actual, line_pred, line_ci, grid_color):
+        """Строит графики в стиле приложения (тёмный фон, контрастные линии)."""
+        figures = []
+        cusq = self.results["CUSUMSQ"]
+        S, lo, hi = cusq["S"], cusq["band_lo"], cusq["band_hi"]
+
+        def _dark_axes(ax):
+            ax.set_facecolor(bg_dark)
+            ax.tick_params(colors=text_light)
+            ax.xaxis.label.set_color(text_light)
+            ax.yaxis.label.set_color(text_light)
+            ax.title.set_color(text_light)
+            for spine in ax.spines.values():
+                spine.set_color(grid_color)
+            ax.grid(True, alpha=0.5, color=grid_color, linestyle='--')
+
+        # 1. z_t over time
+        fig1, ax = plt.subplots(figsize=(10, 4))
+        fig1.patch.set_facecolor(bg_dark)
+        ax.plot(self.t, self.z, marker='o', linestyle='-', linewidth=2, markersize=5, color=line_actual)
+        ax.axhline(0, color=text_light, linestyle='--', linewidth=1.5)
+        ax.axhline(2, color=line_pred, linestyle='--', linewidth=1, alpha=0.8)
+        ax.axhline(-2, color=line_pred, linestyle='--', linewidth=1, alpha=0.8)
+        ax.set_title('Стандартизированные ошибки прогноза (z_t)')
+        ax.set_ylabel('z')
+        _dark_axes(ax)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', color=text_light)
+        plt.tight_layout()
+        figures.append(fig1)
+
+        # 2. PIT histogram
+        fig2, ax = plt.subplots(figsize=(6, 4))
+        fig2.patch.set_facecolor(bg_dark)
+        ax.hist(self.pit, bins=8, density=True, color=line_actual, edgecolor=text_light, linewidth=0.8)
+        ax.axhline(1.0, color=text_light, linestyle='--', linewidth=2)
+        ax.set_title('PIT histogram')
+        ax.set_xlabel('PIT')
+        _dark_axes(ax)
+        plt.tight_layout()
+        figures.append(fig2)
+
+        # 3. CUSUMSQ
+        x = np.arange(1, len(S) + 1) / len(S)
+        fig3, ax = plt.subplots(figsize=(10, 4))
+        fig3.patch.set_facecolor(bg_dark)
+        ax.plot(x, S, label='CUSUMSQ', color=line_actual, linewidth=2)
+        ax.plot(x, x, linestyle='--', label='Expected', color=text_light, linewidth=1.5)
+        ax.plot(x, lo, linestyle='--', alpha=0.7, color=line_ci)
+        ax.plot(x, hi, linestyle='--', alpha=0.7, color=line_ci)
+        ax.set_title(f"CUSUMSQ (p-value = {cusq['p_value']:.3f})")
+        ax.set_xlabel('t / T')
+        ax.legend(facecolor=bg_dark, edgecolor=grid_color, labelcolor=text_light)
+        _dark_axes(ax)
+        plt.tight_layout()
+        figures.append(fig3)
+
+        return figures
+
+
 def process(df, target_platform='tta_android', target_product='avia',
             test_period_start=None, test_period_end=None):
     """
@@ -216,6 +354,33 @@ def process(df, target_platform='tta_android', target_product='avia',
         'dm_conclusion': dm_conclusion,
     }
 
+    # --- Диагностика отклонений прогноза (Forecast deviation diagnostics) ---
+    diagnostics_results = None
+    diagnostics_figures = []
+    if n_test >= 15:
+        try:
+            diag = ForecastDeviationDiagnostics(test_predictions_with_dates)
+            diag.run_tests()
+            diagnostics_results = {
+                'PIT_KS': diag.results['PIT_KS'],
+                'JB_z': diag.results['JB_z'],
+                'LB_z': diag.results['LB_z'],
+                'CUSUMSQ_pvalue': diag.results['CUSUMSQ']['p_value'],
+                'summary_lines': diag.summary_lines(),
+            }
+            bg_dark = '#1a1d24'
+            text_light = '#eaeaea'
+            line_actual = '#00D4FF'
+            line_pred = '#FF6B6B'
+            line_ci = '#9B59B6'
+            grid_color = '#4a4a5a'
+            diagnostics_figures = diag.build_figures(
+                bg_dark, text_light, line_actual, line_pred, line_ci, grid_color
+            )
+        except Exception:
+            diagnostics_results = None
+            diagnostics_figures = []
+
     # --- Построение графиков ---
     figures = []
     bg_dark = '#1a1d24'
@@ -305,6 +470,9 @@ def process(df, target_platform='tta_android', target_product='avia',
     plt.tight_layout()
     figures.append(fig_acf)
 
+    # Графики диагностики отклонений прогноза (z_t, PIT, CUSUMSQ)
+    figures.extend(diagnostics_figures)
+
     summary_lines = [
         "ИТОГОВАЯ СВОДКА СТАТИСТИЧЕСКИХ ТЕСТОВ",
         f"1. Автокорреляция: {'обнаружена' if has_autocorr else 'не обнаружена'}",
@@ -325,6 +493,7 @@ def process(df, target_platform='tta_android', target_product='avia',
         'residuals_info': residuals_info,
         'hac_results': hac_results,
         'dm_results': dm_results,
+        'diagnostics': diagnostics_results,
         'summary': summary_lines,
         'figures': figures,
         'target_platform': target_platform,

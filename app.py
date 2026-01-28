@@ -186,6 +186,18 @@ def main():
     st.write(f"**Тест Диболда-Мариано:** p-value = {dm['dm_pvalue']:.6f} | "
              f"DM статистика: {dm['dm_stat']:.6f}")
 
+    # --- Диагностика отклонений прогноза (Forecast deviation diagnostics) ---
+    if result.get('diagnostics') is not None:
+        st.markdown('---')
+        st.subheader('Диагностика отклонений прогноза (Forecast deviation diagnostics)')
+        for line in result['diagnostics']['summary_lines']:
+            st.write(line)
+        st.caption(
+            "Маленькие p (PIT/JB) → возможная некалибровка распределения прогноза; "
+            "маленький p (LB) → систематическая динамика в ошибках; "
+            "маленький CUSUMSQ p → нестабильность дисперсии/режима."
+        )
+
     st.markdown('---')
     st.subheader('Итоговая сводка')
     for line in result['summary']:
