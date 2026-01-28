@@ -173,13 +173,19 @@ def process(df, target_platform='tta_android', target_product='avia',
         if not pd.api.types.is_datetime64_any_dtype(D_result_d['order_date']):
             D_result_d['order_date'] = pd.to_datetime(D_result_d['order_date'])
 
+    # Как в analysis.ipynb: убираем order_date из таблицы для обучения
     D_result = D_result_d.drop(columns=['order_date'], errors='ignore') if 'order_date' in D_result_d.columns else D_result_d.copy()
 
-    target_column = None
-    for col in D_result.columns:
-        if (target_platform in col and target_product in col and col.endswith('_revenue')):
-            target_column = col
-            break
+    # Целевая колонка: как в ноутбуке — точное имя {platform}_{product}_revenue, иначе первый подходящий
+    exact_target = f"{target_platform}_{target_product}_revenue"
+    if exact_target in D_result.columns:
+        target_column = exact_target
+    else:
+        target_column = None
+        for col in D_result.columns:
+            if (target_platform in col and target_product in col and col.endswith('_revenue')):
+                target_column = col
+                break
 
     if target_column is None:
         rev_cols = [c for c in D_result.columns if 'revenue' in c]
