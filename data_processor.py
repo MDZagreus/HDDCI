@@ -16,7 +16,6 @@ import warnings
 warnings.filterwarnings('ignore')
 from scipy import stats
 from statsmodels.stats.diagnostic import acorr_ljungbox
-from statsmodels.tsa.stattools import acf
 
 
 def cusumsq(resid):
@@ -272,7 +271,6 @@ def process(df, target_platform='tta_android', target_product='avia',
 
     info_lines = [
         f"Целевая колонка: {target_column}",
-        f"Колонки в D_result: {list(D_result.columns)}",
         f"Размер D_result: {D_result.shape}",
         f"Распределение test_period:\n{D_result['test_period'].value_counts()}",
         f"Размер train данных: {train_data.shape}",
@@ -313,90 +311,8 @@ def process(df, target_platform='tta_android', target_product='avia',
             diagnostics_results = None
             diagnostics_figures = []
 
-    # --- Построение графиков ---
-    figures = []
-    bg_dark = '#1a1d24'
-    text_light = '#eaeaea'
-    line_actual = '#00D4FF'
-    line_pred = '#FF6B6B'
-    line_ci = '#9B59B6'
-    line_mean = '#F39C12'
-    grid_color = '#4a4a5a'
-
-    def _dark_axes(ax):
-        ax.set_facecolor(bg_dark)
-        ax.tick_params(colors=text_light)
-        ax.xaxis.label.set_color(text_light)
-        ax.yaxis.label.set_color(text_light)
-        ax.title.set_color(text_light)
-        for spine in ax.spines.values():
-            spine.set_color(grid_color)
-        ax.grid(True, alpha=0.5, color=grid_color, linestyle='--')
-
-    fig_ts, axes = plt.subplots(2, 1, figsize=(12, 10))
-    fig_ts.patch.set_facecolor(bg_dark)
-    ax1, ax2 = axes[0], axes[1]
-
-    ax1.plot(dates, actual_values, marker='o', linestyle='-', linewidth=2.5, markersize=6,
-             label='Фактические значения', color=line_actual)
-    ax1.plot(dates, predicted_values, marker='s', linestyle='--', linewidth=2.5, markersize=6,
-             label='Прогноз модели', color=line_pred)
-    ax1.set_xlabel('Дата')
-    ax1.set_ylabel(f'Относительное изменение {target_column}')
-    ax1.set_title(f'Временной ряд: факт vs прогноз — {target_platform} / {target_product}')
-    textstr = f'MAE: {test_mae:.6f}\nRMSE: {test_rmse:.6f}\nR²: {test_r2:.4f}'
-    ax1.text(0.02, 0.98, textstr, transform=ax1.transAxes, fontsize=9,
-             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='#262730', edgecolor=grid_color, alpha=0.95),
-             color=text_light)
-    ax1.legend(loc='upper right', fontsize=9, facecolor=bg_dark, edgecolor=grid_color, labelcolor=text_light)
-    _dark_axes(ax1)
-    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right', color=text_light)
-
-    bins = min(20, max(3, n_test // 3))
-    ax2.hist(residuals_test, bins=bins, alpha=0.85, color=line_actual, edgecolor=text_light, linewidth=0.8, label='Остатки')
-    ax2.axvline(mean_residuals, color=line_mean, linestyle='--', linewidth=2.5,
-                label=f'Среднее: {mean_residuals:.6f}')
-    ax2.axvline(0, color=text_light, linestyle='-', linewidth=1.2, alpha=0.8, label='Ноль (H₀)')
-    ax2.set_xlabel('Остатки (факт - прогноз)')
-    ax2.set_ylabel('Частота')
-    ax2.set_title('Распределение остатков')
-    ax2.legend(loc='best', fontsize=9, facecolor=bg_dark, edgecolor=grid_color, labelcolor=text_light)
-    _dark_axes(ax2)
-    plt.tight_layout()
-    figures.append(fig_ts)
-
-    fig_acf, axes = plt.subplots(1, 2, figsize=(12, 5))
-    fig_acf.patch.set_facecolor(bg_dark)
-    if n_test > 1:
-        acf_vals = acf(residuals_test, nlags=min(20, n_test - 1), fft=False)
-        lags = range(len(acf_vals))
-        axes[0].stem(lags, acf_vals, linefmt=line_actual, basefmt=' ', markerfmt='o')
-        axes[0].axhline(y=0, color=text_light, linestyle='-', linewidth=1)
-        conf_int = 1.96 / np.sqrt(n_test)
-        axes[0].axhline(y=conf_int, color=line_pred, linestyle='--', linewidth=1.5, alpha=0.9, label='95% ДИ')
-        axes[0].axhline(y=-conf_int, color=line_pred, linestyle='--', linewidth=1.5, alpha=0.9)
-        axes[0].set_xlabel('Лаг')
-        axes[0].set_ylabel('Автокорреляция')
-        axes[0].set_title('ACF остатков', fontweight='bold')
-        axes[0].legend(facecolor=bg_dark, edgecolor=grid_color, labelcolor=text_light)
-        _dark_axes(axes[0])
-
-    axes[1].plot(dates, residuals_test, marker='o', linestyle='-', linewidth=2, markersize=5,
-                 color=line_actual)
-    axes[1].axhline(y=0, color=text_light, linestyle='--', linewidth=2, label='Ноль')
-    axes[1].axhline(y=mean_residuals, color=line_mean, linestyle=':', linewidth=2.5,
-                   label=f'Среднее: {mean_residuals:.6f}')
-    axes[1].set_xlabel('Дата')
-    axes[1].set_ylabel('Остатки')
-    axes[1].set_title('Остатки во времени', fontweight='bold')
-    axes[1].legend(facecolor=bg_dark, edgecolor=grid_color, labelcolor=text_light)
-    _dark_axes(axes[1])
-    plt.setp(axes[1].xaxis.get_majorticklabels(), rotation=45, ha='right', color=text_light)
-    plt.tight_layout()
-    figures.append(fig_acf)
-
-    # Графики диагностики отклонений прогноза (z_t, PIT, CUSUMSQ)
-    figures.extend(diagnostics_figures)
+    # --- Построение графиков: только z_t, PIT histogram, CUSUMSQ ---
+    figures = list(diagnostics_figures)
 
     summary_lines = [
         "ИТОГОВАЯ СВОДКА",
