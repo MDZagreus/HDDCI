@@ -311,8 +311,45 @@ def process(df, target_platform='tta_android', target_product='avia',
             diagnostics_results = None
             diagnostics_figures = []
 
-    # --- Построение графиков: только z_t, PIT histogram, CUSUMSQ ---
-    figures = list(diagnostics_figures)
+    # --- Построение графиков: факт vs прогноз, затем z_t, PIT, CUSUMSQ ---
+    figures = []
+    bg_dark = '#1a1d24'
+    text_light = '#eaeaea'
+    line_actual = '#00D4FF'
+    line_pred = '#FF6B6B'
+    grid_color = '#4a4a5a'
+
+    def _dark_axes(ax):
+        ax.set_facecolor(bg_dark)
+        ax.tick_params(colors=text_light)
+        ax.xaxis.label.set_color(text_light)
+        ax.yaxis.label.set_color(text_light)
+        ax.title.set_color(text_light)
+        for spine in ax.spines.values():
+            spine.set_color(grid_color)
+        ax.grid(True, alpha=0.5, color=grid_color, linestyle='--')
+
+    # График факт vs прогноз
+    fig_ts, ax = plt.subplots(figsize=(12, 5))
+    fig_ts.patch.set_facecolor(bg_dark)
+    ax.plot(dates, actual_values, marker='o', linestyle='-', linewidth=2.5, markersize=6,
+            label='Фактические значения', color=line_actual)
+    ax.plot(dates, predicted_values, marker='s', linestyle='--', linewidth=2.5, markersize=6,
+            label='Прогноз модели', color=line_pred)
+    ax.set_xlabel('Дата')
+    ax.set_ylabel(f'Относительное изменение {target_column}')
+    ax.set_title(f'Факт vs прогноз — {target_platform} / {target_product}')
+    textstr = f'MAE: {test_mae:.6f}\nRMSE: {test_rmse:.6f}\nR²: {test_r2:.4f}'
+    ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=9,
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='#262730', edgecolor=grid_color, alpha=0.95),
+            color=text_light)
+    ax.legend(loc='upper right', fontsize=9, facecolor=bg_dark, edgecolor=grid_color, labelcolor=text_light)
+    _dark_axes(ax)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', color=text_light)
+    plt.tight_layout()
+    figures.append(fig_ts)
+
+    figures.extend(diagnostics_figures)
 
     summary_lines = [
         "ИТОГОВАЯ СВОДКА",
