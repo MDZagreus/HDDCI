@@ -105,15 +105,20 @@ def _parse_platform_product_metric_columns(columns):
 
 def main():
     st.title('○ Анализ временных рядов')
-    st.markdown('Загрузите CSV с данными и выберите параметры анализа.')
     st.markdown('---')
+
+    if 'result' not in st.session_state:
+        st.session_state.result = None
+    if 'last_file_id' not in st.session_state:
+        st.session_state.last_file_id = None
 
     with st.sidebar:
         st.header('· Параметры')
         uploaded = st.file_uploader('Загрузите CSV-файл', type=['csv'], key='csv_upload')
 
     if uploaded is None:
-        st.info('Загрузите CSV-файл, чтобы начать анализ.')
+        st.session_state.result = None
+        st.info('Загрузите CSV-файл, выберите параметры и нажмите «Запустить анализ».')
         return
 
     try:
@@ -121,6 +126,11 @@ def main():
     except Exception as e:
         st.error(f'Ошибка чтения файла: {e}')
         return
+
+    file_id = getattr(uploaded, 'file_id', uploaded.name)
+    if file_id != st.session_state.last_file_id:
+        st.session_state.result = None
+        st.session_state.last_file_id = file_id
 
     if df.empty:
         st.warning('Файл пуст.')
@@ -162,6 +172,7 @@ def main():
             help='Колонки с _lag исключены',
             key='metric'
         )
+        run_clicked = st.button('Запустить анализ', type='primary', use_container_width=True)
 
     prefix = f"{target_platform}_{target_product}_"
     target_col_candidate = f"{target_platform}_{target_product}_{target_metric}"
@@ -170,28 +181,42 @@ def main():
         st.error(f"Целевая колонка '{target_col_candidate}' не найдена. Доступные: {matching[:15]}...")
         return
 
-    with st.spinner('Выполняется анализ...'):
-        try:
-            result = process(
-                df,
-                target_platform=target_platform,
-                target_product=target_product,
-                target_metric=target_metric
-            )
-        except Exception as e:
-            st.exception(e)
-            return
+    if run_clicked:
+        with st.spinner('Выполняется анализ...'):
+            try:
+                st.session_state.result = process(
+                    df,
+                    target_platform=target_platform,
+                    target_product=target_product,
+                    target_metric=target_metric
+                )
+            except Exception as e:
+                st.exception(e)
+                st.session_state.result = None
 
+    if st.session_state.result is None:
+        st.info('Выберите параметры и нажмите «Запустить анализ» в сайдбаре.')
+        return
+
+    result = st.session_state.result
     st.success('Анализ завершён.')
 
-    # --- Информация о данных ---
+    # --- Информация о данных (лаконично) ---
     st.subheader('· Информация о данных')
-    for line in result['info']:
-        if '\n' in line:
-            st.text(line.split('\n')[0])
-            st.write(line.split('\n', 1)[1] if '\n' in line else '')
-        else:
-            st.text(line)
+    info = result['info']
+    train_shape = test_shape = n_features = ''
+    for s in info:
+        if 'train данных' in s:
+            train_shape = s.split(': ')[-1]
+        elif 'test данных' in s:
+            test_shape = s.split(': ')[-1]
+        elif 'признаков' in s.lower():
+            n_features = s.split(': ')[-1]
+    st.caption(
+        f"Целевая: **{result['target_column']}** · "
+        f"Train: {train_shape} · Test: {test_shape} · "
+        f"Признаков: {n_features}"
+    )
     st.markdown('---')
 
     # --- Метрики модели ---
