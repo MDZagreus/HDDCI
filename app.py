@@ -21,7 +21,7 @@ DARK = {
 
 st.set_page_config(
     page_title='Анализ временных рядов',
-    page_icon='○',
+    page_icon='▤',
     layout='wide',
     initial_sidebar_state='expanded',
 )
@@ -104,7 +104,7 @@ def _parse_platform_product_metric_columns(columns):
 
 
 def main():
-    st.title('○ Анализ временных рядов')
+    st.title('▤ Анализ временных рядов')
     st.markdown('---')
 
     if 'result' not in st.session_state:
@@ -113,7 +113,7 @@ def main():
         st.session_state.last_file_id = None
 
     with st.sidebar:
-        st.header('· Параметры')
+        st.header('▬ Параметры')
         uploaded = st.file_uploader('Загрузите CSV-файл', type=['csv'], key='csv_upload')
 
     if uploaded is None:
@@ -202,7 +202,7 @@ def main():
     st.success('Анализ завершён.')
 
     # --- Информация о данных (лаконично) ---
-    st.subheader('· Информация о данных')
+    st.subheader('▬ Информация о данных')
     info = result['info']
     train_shape = test_shape = n_features = ''
     for s in info:
@@ -220,7 +220,7 @@ def main():
     st.markdown('---')
 
     # --- Метрики модели ---
-    st.subheader('· Метрики модели')
+    st.subheader('▬ Метрики модели')
     m = result['metrics']
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
@@ -238,23 +238,23 @@ def main():
     st.markdown('---')
 
     # --- Топ признаков ---
-    st.subheader('· Топ-10 важных признаков')
+    st.subheader('▬ Топ-10 важных признаков')
     st.dataframe(result['feature_importance'].head(10), use_container_width=True, hide_index=True)
     st.markdown('---')
 
     # --- Визуализации ---
-    st.subheader('· Визуализации')
+    st.subheader('▬ Визуализации')
     for fig in result['figures']:
         st.pyplot(fig)
         st.markdown('')
 
     # --- Таблица временного ряда ---
-    st.subheader('· Временной ряд (test_period)')
+    st.subheader('▬ Временной ряд (test_period)')
     st.dataframe(result['time_series_df'], use_container_width=True, hide_index=True)
     st.markdown('---')
 
     # --- Остатки и тесты ---
-    st.subheader('· Остатки и статистические тесты')
+    st.subheader('▬ Остатки и статистические тесты')
     ri = result['residuals_info']
     st.write(f"Размер test_period: {ri['n_test']} | Среднее остатков: {ri['mean']:.6f} | "
              f"Стандартное отклонение: {ri['std']:.6f}")
@@ -265,7 +265,7 @@ def main():
     # --- Диагностика отклонений прогноза (PIT и CUSUMSQ) ---
     if result.get('diagnostics') is not None:
         st.markdown('---')
-        st.subheader('· Диагностика отклонений прогноза (Forecast deviation diagnostics)')
+        st.subheader('▬ Диагностика отклонений прогноза (Forecast deviation diagnostics)')
         for line in result['diagnostics']['summary_lines']:
             st.write(line)
         st.caption(
@@ -274,7 +274,7 @@ def main():
         )
 
     st.markdown('---')
-    st.subheader('· Итоговая сводка')
+    st.subheader('▬ Итоговая сводка')
     for line in result['summary']:
         st.write(line)
 
