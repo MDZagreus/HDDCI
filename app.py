@@ -20,7 +20,7 @@ DARK = {
 }
 
 st.set_page_config(
-    page_title='Анализ временных рядов',
+    page_title='Анализ отклонений временного ряда',
     page_icon='▤',
     layout='wide',
     initial_sidebar_state='expanded',
@@ -104,7 +104,7 @@ def _parse_platform_product_metric_columns(columns):
 
 
 def main():
-    st.title('▤ Анализ временных рядов')
+    st.title('▤ Анализ отклонений временного ряда')
     st.markdown('---')
 
     if 'result' not in st.session_state:
