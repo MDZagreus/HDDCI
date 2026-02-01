@@ -150,7 +150,7 @@ class ForecastDeviationDiagnostics:
         return figures
 
 
-def process(df, target_platform='tta_android', target_product='avia',
+def process(df, target_platform='tta_android', target_product='avia', target_metric='revenue',
             test_period_start=None, test_period_end=None):
     """
     Обрабатывает DataFrame и выполняет полный анализ.
@@ -175,22 +175,23 @@ def process(df, target_platform='tta_android', target_product='avia',
     # Как в analysis.ipynb: убираем order_date из таблицы для обучения
     D_result = D_result_d.drop(columns=['order_date'], errors='ignore') if 'order_date' in D_result_d.columns else D_result_d.copy()
 
-    # Целевая колонка: как в ноутбуке — точное имя {platform}_{product}_revenue, иначе первый подходящий
-    exact_target = f"{target_platform}_{target_product}_revenue"
+    # Целевая колонка: {platform}_{product}_{metric}
+    exact_target = f"{target_platform}_{target_product}_{target_metric}"
     if exact_target in D_result.columns:
         target_column = exact_target
     else:
         target_column = None
+        prefix = f"{target_platform}_{target_product}_"
         for col in D_result.columns:
-            if (target_platform in col and target_product in col and col.endswith('_revenue')):
+            if col.startswith(prefix) and col.endswith(f"_{target_metric}"):
                 target_column = col
                 break
 
     if target_column is None:
-        rev_cols = [c for c in D_result.columns if 'revenue' in c]
+        matching = [c for c in D_result.columns if c.startswith(f"{target_platform}_{target_product}_")]
         raise ValueError(
-            f"Целевая колонка для platform='{target_platform}' и product='{target_product}' не найдена. "
-            f"Доступные колонки с revenue: {rev_cols}"
+            f"Целевая колонка для platform='{target_platform}', product='{target_product}', metric='{target_metric}' не найдена. "
+            f"Доступные колонки для этой пары: {matching[:15]}..."
         )
 
     train_data = D_result[D_result['test_period'] == 0].copy()
@@ -338,7 +339,7 @@ def process(df, target_platform='tta_android', target_product='avia',
             label='Прогноз модели', color=line_pred)
     ax.set_xlabel('Дата')
     ax.set_ylabel(f'Относительное изменение {target_column}')
-    ax.set_title(f'Факт vs прогноз — {target_platform} / {target_product}')
+    ax.set_title(f'Факт vs прогноз — {target_platform} / {target_product} / {target_metric}')
     textstr = f'MAE: {test_mae:.6f}\nRMSE: {test_rmse:.6f}\nR²: {test_r2:.4f}'
     ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=9,
             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='#262730', edgecolor=grid_color, alpha=0.95),
@@ -380,4 +381,5 @@ def process(df, target_platform='tta_android', target_product='avia',
         'figures': figures,
         'target_platform': target_platform,
         'target_product': target_product,
+        'target_metric': target_metric,
     }

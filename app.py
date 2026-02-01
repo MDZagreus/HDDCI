@@ -109,15 +109,38 @@ def main():
         st.error("В данных должна быть колонка 'test_period'.")
         return
 
-    target_col_candidate = f"{target_platform}_{target_product}_revenue"
+    # Доступные метрики для выбранной платформы и продукта
+    prefix = f"{target_platform}_{target_product}_"
+    available_metrics = sorted({
+        c[len(prefix):] for c in df.columns
+        if c.startswith(prefix) and len(c) > len(prefix)
+    })
+    default_metrics = ['revenue', 'orders', 'gmv', 'aov', 'searchers', 'cr']
+    metric_options = available_metrics if available_metrics else default_metrics
+    default_idx = metric_options.index('revenue') if 'revenue' in metric_options else 0
+
+    with st.sidebar:
+        target_metric = st.selectbox(
+            'Метрика (target_metric)',
+            options=metric_options,
+            index=default_idx,
+            help='Целевая метрика: колонка {platform}_{product}_{metric}'
+        )
+
+    target_col_candidate = f"{target_platform}_{target_product}_{target_metric}"
     if target_col_candidate not in df.columns:
-        rev_cols = [c for c in df.columns if 'revenue' in c]
-        st.error(f"Целевая колонка '{target_col_candidate}' не найдена. Доступные с revenue: {rev_cols[:10]}...")
+        matching = [c for c in df.columns if c.startswith(prefix)]
+        st.error(f"Целевая колонка '{target_col_candidate}' не найдена. Доступные: {matching[:15]}...")
         return
 
     with st.spinner('Выполняется анализ...'):
         try:
-            result = process(df, target_platform=target_platform, target_product=target_product)
+            result = process(
+                df,
+                target_platform=target_platform,
+                target_product=target_product,
+                target_metric=target_metric
+            )
         except Exception as e:
             st.exception(e)
             return
