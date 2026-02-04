@@ -9,6 +9,7 @@ import pandas as pd
 from datetime import date, timedelta
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # для работы без GUI (Streamlit)
@@ -204,13 +205,48 @@ def process(df, target_platform='tta_android', target_product='avia', target_met
     X_test = test_data[feature_columns]
     y_test = test_data[target_column]
 
-    # Обучение модели
-    model = xgb.XGBRegressor(
-        n_estimators=100, max_depth=6, learning_rate=0.1,
-        subsample=0.8, colsample_bytree=0.8, random_state=42,
-        n_jobs=-1, verbosity=0
+    # Обучение модели + кросс-валидация гиперпараметров (TimeSeriesSplit)
+    base_model = xgb.XGBRegressor(
+        random_state=42,
+        n_jobs=-1,
+        verbosity=0
     )
-    model.fit(X_train, y_train)
+
+    param_distributions = {
+        "n_estimators": [200, 400, 700, 1000],
+        "max_depth": [3, 4, 5, 6, 8],
+        "learning_rate": [0.01, 0.03, 0.05, 0.1, 0.2],
+        "subsample": [0.6, 0.8, 1.0],
+        "colsample_bytree": [0.6, 0.8, 1.0],
+        "min_child_weight": [1, 3, 5, 10],
+        "reg_alpha": [0.0, 0.1, 1.0],
+        "reg_lambda": [0.5, 1.0, 2.0],
+    }
+
+    if len(X_train) >= 120:
+        n_splits = 4
+    elif len(X_train) >= 60:
+        n_splits = 3
+    else:
+        n_splits = 2
+
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+
+    search = RandomizedSearchCV(
+        estimator=base_model,
+        param_distributions=param_distributions,
+        n_iter=30,
+        scoring="neg_mean_absolute_error",
+        cv=tscv,
+        random_state=42,
+        n_jobs=-1,
+        verbose=0,
+        refit=True
+    )
+
+    search.fit(X_train, y_train)
+    model = search.best_estimator_
+
     y_train_pred = model.predict(X_train)
     y_test_pred = model.predict(X_test)
 
